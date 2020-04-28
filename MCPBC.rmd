@@ -1,0 +1,230 @@
+# Title: Primary Biliary Cirrhosis Survival Analysis
+# Date: April 28th 2020
+# Author: Nelson Fotzo Simo
+
+
+
+# 1. Load data and Libraries
+
+```{r}
+library(tidyverse)
+library(survival)
+
+dat <- pbc
+```
+
+# 2. Brief description of the data
+The data is from the Mayo Clinic trial in primary biliary cirrhosis (PBC) of the liver conducted between 1974 and 1984.
+
+It contains a total of 418 PBC patients who registered for the randomized placebo controlled trial of the drug D-penicillamine :
+- 312 patients participated in the randomized trial 
+- 106 cases did not participate in the clinical trial, but consented to have basic measurements recorded and to be followed for survival.
+
+# 3. Descriptive Statistics and Covariate transformation
+
+```{r}
+summary(dat)
+```
+## No transformation required for :
+- age [in years]: Subjects are aged between 26 and 79 years. Both mean and median age of 418 subjects is 51 years
+- albumin [in g/dl] : Serum albumin level ranges between 1.96 and 4.64 g/dl
+- sex [M or F] : Factor with two levels
+- stage [1 to 4] : Histologic stage of disease, 6 missing values
+- edema [0, 0.5 or 1] : 0 for no edema, 0.5 for untreated or successfully treated edema and 1 for persistent edema despite diuretic therapy
+
+## time [days] : Time in study before quiting the study or dying or undergoing a transplant
+
+Convert time from days to years.
+```{r}
+dat <- mutate(dat, time = time/365.25)
+```
+
+## bili [in mg/dl] : Serum bilirubin concentration with values ranging from 0.3 to 28
+
+A histogram of bili shows a right skewness, with 75% of samples between 0.3 and 3.4 and only 25% greater than 3.4.
+A logarithmic transformation will be used to improve data normality and enhance modeling performance.
+```{r}
+hist(dat$bili)
+hist(log(dat$bili))
+```
+## Other covariates : 
+- alk.phos [in U/liter] :	Alkaline phosphotase (U/liter) level, 106 missing values
+- ast [in U/ml] : Aspartate aminotransferase concentration, 106 missing values
+- chol [in mg/dl] : Serum cholesterol level, 134 missing values
+- copper [in ug/day] : Urine copper, 108 missing values
+- platelet : Platelet count, 11 missing values
+- protime : Standardized blood clotting time, 2 missing values
+- trig [in mg/dl] : Triglycerides concentration, 136 missing values
+```{r}
+hist(dat$alk.phos)
+hist(log(dat$alk.phos))   # Log transformation normalizes data
+hist(dat$ast)
+hist(log(dat$ast))        # Log transformation normalizes data
+hist(dat$chol)
+hist(log(dat$chol))       # Log transformation normalizes data
+hist(dat$copper)
+hist(log(dat$copper))     # Log transformation normalizes data
+hist(dat$platelet)
+hist(log(dat$platelet))
+hist(dat$protime)
+hist(log(dat$protime))
+hist(dat$trig)
+hist(log(dat$trig))       # Log transformation normalizes data
+```
+
+## Convert integers to factors for covariates : 
+- hepato [0 or 1] : Presence of enlarged liver, 106 missing values
+- spiders [0 or 1] : Presence of blood vessel malformations in the skin, 106 missing values
+- ascites [0 or 1]: Presence of ascites, 106 missing values
+
+```{r}
+dat <- mutate(dat, 
+              hepato = factor(hepato, levels = c('0', '1'), labels = c('Absent', 'Present')),   
+              spiders = factor(spiders, levels = c('0', '1'), labels = c('Absent', 'Present')),
+              ascites = factor(ascites, levels = c('0', '1'), labels = c('Absent', 'Present')),
+             )
+summary(dat)
+```
+## trt [1 or 2 or NA] : 1 for D-penicillmain, 2 for placebo, NA for no participation in trial (106 patients)
+
+Given that there are several covariates with no values for patients who did not participate in the trial, two options will be considered for downsampling:
+
+Keep patients who were absent from the trial : 
+"Placebo" and "no participation" patients grouped under factor "Notreatment" 
+and
+"D-penicillmain" patients under factor "Treatment" and covariates with many missing values removed from the    study
+OR
+Discard patients who did not take part in the trial :
+"Placebo" patients 
+vs 
+"D-penicillmain" patients under factor "Treatment"
+
+### Keep patients who did not take part in the trial - New dataset : datwithnotrial
+```{r}
+datwithnotrial <- mutate(dat, trt = ifelse(is.na(trt), 0,      # Transform no participation(NA) to 0
+                                    ifelse(trt != 1, 0, trt)),            # Transform placebo (2) to 0
+                              trt = factor(trt, levels = c('0', '1'), labels = c('Notreatment', 'Treatment'))
+                        ) %>% select(-id)     # Discard id
+summary(datwithnotrial)
+```
+
+
+```{r}
+# Discard covariates with 106 or more missing values :  ascites, hepato, spiders, chol, copper, alk.phos, ast, trig
+
+datwithnotrial <- transmute(datwithnotrial,
+                               time, status, trt, age, sex, edema, bili, albumin, platelet, protime, stage
+                              )
+# Discard few patients with missing values
+datwithnotrial <- datwithnotrial[complete.cases(datwithnotrial), ]
+
+summary(datwithnotrial)
+```
+
+### Discard patients who did not take part in the trial - New dataset : dattrialonly
+```{r}
+dattrialonly <- dat[!is.na(dat$trt), ]  
+dattrialonly <- mutate(dattrialonly, trt = factor(trt, levels = c('2', '1'), labels = c('Placebo',                                       'Treatment')) 
+                      ) %>% select(-id)     # Discard id
+summary(dattrialonly)
+```
+```{r}
+# Discard few patients with missing values
+dattrialonly <- dattrialonly[complete.cases(dattrialonly), ]
+summary(dattrialonly)
+```
+
+## status [0, 1 or 2] : 0 for censored, 1 for transplant and 2 for dead
+
+We shall consider during analysis either :
+Transplant (1) is considered as censored (i.e liver leaves study) so status = 0 or 1 => Censored
+and status = 2 => death event : Surv(time, status == 2)
+OR
+Transplant (1) is considered as a death event (i.e liver dies) so status = 0 => Censored
+and status = 1 or 2 => death event : Surv(time, status > 0)
+
+# 4. Questions Asked, Methods Used and Results
+
+## 4.1 Among patients who participated in the trial, did the Treatment have an impact on survival compared to Placebo?
+```{r}
+# Transplant(1) considered as Censored
+Mtrial_tc <- coxph(Surv(time, status==2) ~ trt, data=dattrialonly)
+
+# Transplant(1) considered as Death
+Mtrial_td <- coxph(Surv(time, status>0) ~ trt, data=dattrialonly)
+
+
+summary(Mtrial_tc)
+summary(Mtrial_td)
+```
+Result : The D-penicillman treatment was not effective for PBC. It's impact on patient survival is statistically insignificant (p-value of 52%).
+
+
+## 4.2 What is the median survival of patients ?
+```{r}
+# Kaplan-Meier Survival with Transplant considered as censored
+fit.KM1 <- survfit(Surv(time, status == 2) ~ 1, data = dat)
+fit.KM1
+plot(fit.KM1, xlab = "Time [years]", ylab = "Survival probability", main ="Survival - Transplant = censored")
+
+# Kaplan-Meier Survival with Transplant considered as death
+fit.KM2 <- survfit(Surv(time, status > 0) ~ 1, data = dat)
+fit.KM2
+plot(fit.KM2, xlab = "Time [years]", ylab = "Survival probability", main ="Survival - Transplant = death")
+```
+Result :
+
+- Assuming the 25 patients who received liver transplants were healed and left the study after operation, 50% of the studied patients were at risk of dying before 9.30 years.
+
+- Assuming the 25 patients who received liver transplants had no chance of surviving an additional day at the time of the transplants,  50% of the studied patients were at risk of dying before 8.46 years.
+
+
+## 4.3 Which covariates are important for survival time prediction and possible patient counseling/medical decision-making ?
+
+Step-wise model selection based on AIC will be used to determine important variables.
+Transplanted patients considered as censored and all patients are used for analysis (excluding covariates with high count of missing values).
+
+```{r}
+Mfullwithnotrial <- coxph(Surv(time, status==2) ~ trt + age + sex + edema + log(bili) + albumin + platelet +                                                         protime + stage, data=datwithnotrial)
+MAIC_withnotrial <- step(Mfullwithnotrial)
+```
+```{r}
+MAIC_withnotrial
+summary(MAIC_withnotrial)
+confint(MAIC_withnotrial)
+```
+Result : 
+The model obtained has a good Concordance score of 84 %.
+
+A follow-up of patients' Edema, serum albumin and bilirubin levels as well as blood clotting time and the histologic stage of the disease can enable medical practitioners decide for instance which patients have the highest risk of death and need a liver transplant.
+
+- Age : Keeping other covariates constant, a unit increase in age results in a 3 % increase in the hazards of dying of primary biliary cirrhosis.
+
+- Edema : The risk of dying is 2.2 times [= exp(0.795 * 1)]  higher for patients with severe Edema compared to   patients with no Edema (i.e Edema = 0). Also, patients with mild Edema (i.e Edema = 0.5) have a 48% [exp(0.795 * 0.5) = 1.48] higher risk of dying compared to patients with no Edema.
+
+- Bili : Every unit increase in the logarithm of serum bilirubin concentration multiplies the risk of dying by a factor of 2.26.
+
+- Albumin : A drop in serum albumin level reveals a higher risk of death. In fact a unit drop in albumin concentration doubles the risk of death.
+
+- Protime and stage : Every unit increase in blood clotting time and stage of the disease increases the risk of dying by 29% and 34% respectively.
+
+## 4.4 Which 10 patients had the highest risk of dying ?
+
+Let's predict the risk score of each patient using the fitted Cox model.
+
+```{r}
+# New dataset with only important variables
+dat_new <- transmute(dat, id, age, edema, bili, albumin, protime, stage)
+dat_new <- dat_new[complete.cases(dat_new), ]
+
+dat_new <- dat_new %>% mutate(risk_score = predict(MAIC_withnotrial, newdata=dat_new, type="lp")
+                             ) %>% arrange(desc(risk_score))
+head(dat_new, 10)
+```
+
+## Conclusion
+
+•	The D-penicillman treatment is not effective in prolonging the survival of PBC patients. 
+•	50% of the studied patients are at risk of dying before ~ 9 years.
+•	Age, edema, serum albumin and bilirubin concentrations, blood clotting time and histologic stage of disease are all important factors which affect the risk of death of PBC patients.
+
