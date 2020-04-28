@@ -1,6 +1,6 @@
-# The D-penicillman treatment is not effective in prolonging the survival of PBC patients. 
-# 50% of the studied patients are at risk of dying before ~ 9 years.
-# Age, edema, serum albumin and bilirubin concentrations, blood clotting time and histologic stage of disease are all important factors which affect the risk of death of PBC patients.
+## The D-penicillman treatment is not effective in prolonging the survival of PBC patients. 
+## 50% of the studied patients are at risk of dying before ~ 9 years.
+## Age, edema, serum albumin and bilirubin concentrations, blood clotting time and histologic stage of disease are all important factors which affect the risk of death of PBC patients.
 - Age : Keeping other covariates constant, a unit increase in age results in a 3 % increase in the hazards of dying of primary biliary cirrhosis.
 
 - Edema : The risk of dying is 2.2 times [= exp(0.795 * 1)]  higher for patients with severe Edema compared to   patients with no Edema (i.e Edema = 0). Also, patients with mild Edema (i.e Edema = 0.5) have a 48% [exp(0.795 * 0.5) = 1.48] higher risk of dying compared to patients with no Edema.
